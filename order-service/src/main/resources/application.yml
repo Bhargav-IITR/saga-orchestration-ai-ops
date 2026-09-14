@@ -1,0 +1,38 @@
+server:
+  port: 3000
+
+spring:
+  kafka:
+    bootstrap-servers: ${KAFKA_BROKER:localhost:9092}
+    topic:
+      start-saga: start-saga
+      notify-ending: notify-ending
+    consumer:
+      group-id: order-group
+      auto-offset-reset: latest
+
+  data:
+    mongodb:
+      database: admin
+      uri: ${MONGO_DB_URI:mongodb://admin:123456@localhost:27017}
+
+logging:
+  level:
+    org:
+      apache:
+        kafka: OFF
+
+springdoc:
+  api-docs:
+    enabled: true
+    title: Order Service
+    version: openapi_3_0
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: "*"
+  endpoint:
+    health:
+      show-details: always
