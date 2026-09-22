@@ -8,17 +8,21 @@ import com.learn.aisagaagent.service.agent.SagaComposerAgent;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.embedding.EmbeddingModel;
+import dev.langchain4j.mcp.McpToolProvider;
 import dev.langchain4j.service.AiServices;
 import dev.langchain4j.store.embedding.EmbeddingSearchRequest;
 import dev.langchain4j.store.embedding.EmbeddingStore;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 
@@ -32,18 +36,23 @@ public class SagaComposerService {
     private final StringRedisTemplate redis;
     private final ObjectMapper objectMapper;
     private final ChatModel primaryChatModel;
-
-    private static final Duration PLAN_TTL = Duration.ofMinutes(2);
+    private final McpToolProvider mcpToolProvider;
 
     private static final List<String> PROFILES = List.of(
             "new:high-value",
             "new:low-value",
             "vip:any",
+            "returning:high-value",
             "returning:low-value",
             "default");
 
+    @Value("${saga.composer.plan-ttl:PT30M}")
+    private Duration planTtl;
+
     // ─── Scheduled job ────────────────────────────────────────────────────────
-   //@Scheduled(fixedDelay = 1, timeUnit = TimeUnit.MINUTES)// every 30 minutes
+    @Scheduled(
+            initialDelayString = "${saga.composer.initial-delay-ms:10000}",
+            fixedDelayString = "${saga.composer.recompute-delay-ms:1800000}")
     public void recomputePlans() {
         log.info("[SagaComposer] Starting plan recomputation for {} profiles...", PROFILES.size());
 
@@ -51,6 +60,7 @@ public class SagaComposerService {
 
         var dataAnalystAgent  = AiServices.builder(DataAnalystAgent.class)
                 .chatModel(primaryChatModel)
+                .toolProvider(mcpToolProvider)
                 .maxSequentialToolsInvocations(3)
                 .build();
 
@@ -148,17 +158,32 @@ public class SagaComposerService {
         try {
             String cleanJson = extractJson(planJson);
             var plan = objectMapper.readValue(cleanJson, SagaPlan.class);
+            validatePlan(plan);
             plan.setProfileKey(profile);
             plan.setComputedAt(LocalDateTime.now());
 
             String key   = "saga-plan:" + profile;
             String value = objectMapper.writeValueAsString(plan);
 
-            redis.opsForValue().set(key, value, PLAN_TTL);
+            redis.opsForValue().set(key, value, planTtl);
             log.info("[SagaComposer] Plan saved: {} → steps={}", key, plan.getSteps());
-        } catch (JsonProcessingException e) {
+        } catch (JsonProcessingException | IllegalArgumentException e) {
             log.error("[SagaComposer] Invalid JSON for profile '{}' — skipping. Raw: {}",
                     profile, planJson);
+        }
+    }
+
+    private void validatePlan(SagaPlan plan) {
+        Set<String> allowed = Set.of(
+                "PRODUCT_VALIDATION", "FRAUD_VALIDATION", "PAYMENT", "INVENTORY");
+        if (plan.getSteps() == null || plan.getSteps().isEmpty()) {
+            throw new IllegalArgumentException("Plan must contain at least one step");
+        }
+        if (plan.getSteps().stream().distinct().count() != plan.getSteps().size()) {
+            throw new IllegalArgumentException("Plan contains duplicate steps");
+        }
+        if (!allowed.containsAll(plan.getSteps())) {
+            throw new IllegalArgumentException("Plan contains an unsupported step");
         }
     }
 

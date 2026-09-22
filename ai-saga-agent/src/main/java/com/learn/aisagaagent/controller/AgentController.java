@@ -1,14 +1,18 @@
 package com.learn.aisagaagent.controller;
 
 import com.learn.aisagaagent.model.SagaDiagnostic;
+import com.learn.aisagaagent.model.OperationalEscalation;
+import com.learn.aisagaagent.repository.OperationalEscalationRepository;
 import com.learn.aisagaagent.repository.SagaDiagnosticRepository;
 import com.learn.aisagaagent.service.DataAnalystAgentService;
+import com.learn.aisagaagent.service.SagaComposerService;
 import lombok.AllArgsConstructor;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RestController;
 import tools.jackson.databind.ObjectMapper;
 
@@ -24,6 +28,8 @@ public class AgentController {
     private final DataAnalystAgentService dataAnalystAgentService;
     private final SagaDiagnosticRepository diagnosticRepository;
     private final StringRedisTemplate redisTemplate;
+    private final SagaComposerService sagaComposerService;
+    private final OperationalEscalationRepository escalationRepository;
 
 
     @GetMapping("/chat")
@@ -36,11 +42,16 @@ public class AgentController {
         return diagnosticRepository.findAllByOrderByCreatedAtDesc();
     }
 
+    @GetMapping("/escalations")
+    public List<OperationalEscalation> getAllEscalations() {
+        return escalationRepository.findAllByOrderByCreatedAtDesc();
+    }
+
     @GetMapping("/composer/plans")
     public ResponseEntity<Map<String, Object>> getCurrentPlans() {
         List<String> profiles = List.of(
                 "new:high-value", "new:low-value",
-                "vip:any", "returning:low-value", "default"
+                "vip:any", "returning:high-value", "returning:low-value", "default"
         );
 
         Map<String, Object> plans = new LinkedHashMap<>();
@@ -56,5 +67,11 @@ public class AgentController {
             }
         }
         return ResponseEntity.ok(plans);
+    }
+
+    @PostMapping("/composer/recompute")
+    public ResponseEntity<Map<String, String>> recomputePlans() {
+        sagaComposerService.recomputePlans();
+        return ResponseEntity.ok(Map.of("status", "recomputed"));
     }
 }

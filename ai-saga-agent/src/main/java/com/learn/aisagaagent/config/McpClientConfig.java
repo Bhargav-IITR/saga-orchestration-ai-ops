@@ -11,6 +11,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import java.util.List;
+import java.util.Map;
 
 @Configuration
 @RequiredArgsConstructor
@@ -26,6 +27,8 @@ public class McpClientConfig {
     private String productValidationUrl;
     @Value("${mcp.orchestrator-url}")
     private String orchestratorUrl;
+    @Value("${security.api-key:}")
+    private String apiKey;
 
     @Bean
     public McpToolProvider mcpToolProvider() {
@@ -43,12 +46,19 @@ public class McpClientConfig {
 
     private McpClient buildClient(String sseUrl) {
         return new DefaultMcpClient.Builder()
-                .transport(new HttpMcpTransport.Builder()
-                        .sseUrl(sseUrl)
-                        .logResponses(true)
-                        .logRequests(true)
-                        .build())
+                .transport(httpTransport(sseUrl))
                 .build();
+    }
+
+    private HttpMcpTransport httpTransport(String sseUrl) {
+        var builder = new HttpMcpTransport.Builder()
+                .sseUrl(sseUrl)
+                .logResponses(true)
+                .logRequests(true);
+        if (apiKey != null && !apiKey.isBlank()) {
+            builder.customHeaders(Map.of("X-API-Key", apiKey));
+        }
+        return builder.build();
     }
 
 

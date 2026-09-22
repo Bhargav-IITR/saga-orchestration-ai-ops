@@ -22,6 +22,8 @@ class OrchestrationServiceTest {
     @Mock private SagaOrchestratorProducer producer;
     @Mock private JsonUtil jsonUtil;
     @Mock private SagaExecutionController sagaExecutionController;
+    @Mock private SagaPlannerService sagaPlannerService;
+    @Mock private SagaTimeoutService sagaTimeoutService;
 
     @InjectMocks private OrchestrationService orchestrationService;
 

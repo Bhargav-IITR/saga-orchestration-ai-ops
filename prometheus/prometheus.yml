@@ -35,6 +35,9 @@ scrape_configs:
       - targets: [ 'host.docker.internal:8092' ]
         labels:
           app: inventory-service
+      - targets: [ 'host.docker.internal:8099' ]
+        labels:
+          app: ai-saga-agent
 
 otlp:
   translation_strategy: UnderscoreEscapingWithSuffixes

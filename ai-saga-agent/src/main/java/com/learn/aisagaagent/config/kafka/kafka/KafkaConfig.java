@@ -14,6 +14,10 @@ import org.springframework.kafka.annotation.EnableKafka;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
 import org.springframework.kafka.config.TopicBuilder;
 import org.springframework.kafka.core.*;
+import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
+import org.springframework.kafka.listener.DefaultErrorHandler;
+import org.apache.kafka.common.TopicPartition;
+import org.springframework.util.backoff.FixedBackOff;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -52,6 +56,9 @@ public class KafkaConfig {
     @Value("${spring.kafka.topic.payment-remediation}")
     private String paymentRemediationTopic;
 
+    @Value("${spring.kafka.topic.remediation-dlt}")
+    private String remediationDltTopic;
+
     @Bean
     public ConsumerFactory<String, String> consumerFactory() {
         return new DefaultKafkaConsumerFactory<>(consumerProps());
@@ -80,6 +87,8 @@ public class KafkaConfig {
         props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
         props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
         props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
+        props.put(ProducerConfig.ACKS_CONFIG, "all");
+        props.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);
 
         return props;
     }
@@ -99,10 +108,21 @@ public class KafkaConfig {
 
     @Bean
     public ConcurrentKafkaListenerContainerFactory<String, String> kafkaListenerContainerFactory(
-            ConsumerFactory<String, String> consumerFactory) {
+            ConsumerFactory<String, String> consumerFactory,
+            DefaultErrorHandler kafkaErrorHandler) {
         var factory = new ConcurrentKafkaListenerContainerFactory<String, String>();
         factory.setConsumerFactory(consumerFactory);
+        factory.setCommonErrorHandler(kafkaErrorHandler);
         return factory;
+    }
+
+    @Bean
+    public DefaultErrorHandler kafkaErrorHandler(KafkaTemplate<String, String> kafkaTemplate) {
+        var recoverer = new DeadLetterPublishingRecoverer(
+                kafkaTemplate,
+                (record, exception) -> new TopicPartition(
+                        remediationDltTopic, -1));
+        return new DefaultErrorHandler(recoverer, new FixedBackOff(1000L, 2L));
     }
 
     @Bean
@@ -128,5 +148,10 @@ public class KafkaConfig {
     @Bean
     public NewTopic paymentRemediationTopic() {
         return buildTopic(paymentRemediationTopic);
+    }
+
+    @Bean
+    public NewTopic remediationDltTopic() {
+        return buildTopic(remediationDltTopic);
     }
 }

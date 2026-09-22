@@ -85,6 +85,13 @@ class SagaExecutionControllerTest {
         assertEquals(PRODUCT_VALIDATION_FAIL, topic);
     }
 
+    @Test
+    void shouldFallbackFromFraudSuccessToPayment() {
+        setEvent(FRAUD_VALIDATION_SERVICE.toString(), SUCCESS);
+
+        assertEquals(PAYMENT_SUCCESS, sagaExecutionController.getNextTopic(event));
+    }
+
 
     private Event createDefaultEvent(String orderId, String eventId, String txId) {
         Order order = new Order();

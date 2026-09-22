@@ -26,6 +26,7 @@ public class OrchestrationService {
     private final JsonUtil jsonUtil;
     private final SagaExecutionController sagaExecutionController;
     private final SagaPlannerService sagaPlannerService;
+    private final SagaTimeoutService sagaTimeoutService;
 
     public void startSaga(Event event) {
         event.setSource(ORCHESTRATOR.toString());
@@ -33,6 +34,7 @@ public class OrchestrationService {
         var topic = getTopic(event);
         log.info("SAGA STARTED!");
         addHistory(event, "Saga started!");
+        sagaTimeoutService.start(event);
         sendToProducerWithTopic(event, topic);
     }
 
@@ -42,6 +44,7 @@ public class OrchestrationService {
         // Lookup Redis ~10ms | fallback automático se Redis indisponível
         String firstTopic = sagaPlannerService.getFirstTopicForOrder(event.getOrder());
         addHistory(event, "Saga started with plan: " + firstTopic);
+        sagaTimeoutService.start(event);
         producer.sendEvent(firstTopic, jsonUtil.toJson(event).orElseThrow());
     }
 
@@ -51,6 +54,7 @@ public class OrchestrationService {
         log.info("SAGA FINISHED SUCCESSFULLY FOR EVENT {}!", event.getEventId());
         addHistory(event, "Saga finished successfully!");
         notifyFinishedSaga(event);
+        sagaTimeoutService.complete(event.getTransactionId());
     }
 
     public void finishSagaFail(Event event) {
@@ -59,9 +63,11 @@ public class OrchestrationService {
         log.info("SAGA FINISHED WITH ERRORS FOR EVENT {}!", event.getEventId());
         addHistory(event, "Saga finished with errors!");
         notifyFinishedSaga(event);
+        sagaTimeoutService.complete(event.getTransactionId());
     }
 
     public void continueSaga(Event event) {
+        sagaTimeoutService.update(event);
        // 1. Tenta usar plano do AI
         String aiNextTopic = sagaPlannerService.getNextTopicForOrder(
                 event.getOrder(),
@@ -89,14 +95,21 @@ public class OrchestrationService {
     }
 
     public void rollbackSaga(Event event) {
-        String rollbackTopic = sagaPlannerService.getPreviousRollbackTopic(
+        sagaTimeoutService.update(event);
+        var decision = sagaPlannerService.getCurrentRollbackDecision(
                 event.getOrder(),
                 event.getSource()
         );
+        String rollbackTopic = decision.topic();
 
         if (rollbackTopic != null) {
             log.info("[Orchestrator] AI rollback → topic: {}", rollbackTopic);
             producer.sendEvent(rollbackTopic, jsonUtil.toJson(event).orElseThrow());
+            return;
+        }
+
+        if (decision.type() == SagaPlannerService.RollbackDecisionType.COMPLETE) {
+            finishSagaFail(event);
             return;
         }
 
@@ -106,16 +119,23 @@ public class OrchestrationService {
     }
 
     public void handleFail(Event event) {
+        sagaTimeoutService.update(event);
         // Se é o primeiro passo — não há mais nada para fazer rollback
-        String rollbackTopic = sagaPlannerService.getPreviousRollbackTopic(
+        var decision = sagaPlannerService.getRollbackDecision(
                 event.getOrder(),
                 event.getSource()
         );
+        String rollbackTopic = decision.topic();
 
-        if (rollbackTopic == null) {
+        if (decision.type() == SagaPlannerService.RollbackDecisionType.COMPLETE) {
             // Chegou ao início do plano — termina com FAIL
             log.info("[Orchestrator] Rollback chain complete — finishing with FAIL");
             finishSagaFail(event);
+            return;
+        }
+
+        if (decision.type() == SagaPlannerService.RollbackDecisionType.FALLBACK) {
+            sendToProducerWithTopic(event, getTopic(event));
             return;
         }
 

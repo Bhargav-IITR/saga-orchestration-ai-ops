@@ -6,6 +6,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Component;
 
+import java.util.concurrent.TimeUnit;
+
 @Component
 @Slf4j
 @RequiredArgsConstructor
@@ -18,11 +20,12 @@ public class SagaProducer {
 
     public void sendEvent(String playload) {
         try {
-            kafkaTemplate.send(startSagaTopic, playload);
+            kafkaTemplate.send(startSagaTopic, playload).get(10, TimeUnit.SECONDS);
             log.info("Success to send data to topic {} with data {}", startSagaTopic, playload);
 
         } catch (Exception e) {
             log.error("Error trying to send data to topic {} with data {}", startSagaTopic, playload, e);
+            throw new IllegalStateException("Could not publish saga start event", e);
         }
     }
 }

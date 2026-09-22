@@ -6,7 +6,7 @@ import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
 
-@SpringBootApplication
+@SpringBootApplication(scanBasePackages = {"com.learn.aisagaagent", "com.learn.sagacommons"})
 @ConfigurationPropertiesScan
 @EnableScheduling
 public class AiSagaAgentApplication {

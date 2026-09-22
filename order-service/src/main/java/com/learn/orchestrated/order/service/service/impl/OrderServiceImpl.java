@@ -50,6 +50,12 @@ public class OrderServiceImpl implements OrderService {
     private OrderDocument saveOrder(OrderRequest orderRequest) {
         OrderDocument orderDocument = new OrderDocument();
         orderDocument.setProducts(orderRequest.products());
+        orderDocument.setTotalAmount(orderRequest.products().stream()
+                .mapToDouble(item -> item.getQuantity() * item.getProduct().getUnitValue())
+                .sum());
+        orderDocument.setTotalItems(orderRequest.products().stream()
+                .mapToInt(item -> item.getQuantity())
+                .sum());
         orderDocument.setCreatedAt(LocalDateTime.now());
         orderDocument.setTransactionId(generateTransactionId());
 

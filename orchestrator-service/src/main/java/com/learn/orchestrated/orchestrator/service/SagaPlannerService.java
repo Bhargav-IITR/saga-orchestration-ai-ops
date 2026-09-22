@@ -23,7 +23,7 @@ public class SagaPlannerService {
     private static final String DEFAULT_FIRST_TOPIC = "product-validation-success";
 
     public String getFirstTopicForOrder(Order order) {
-        String profileKey = classifyProfile(order);
+        String profileKey = resolveProfile(order);
         return getFirstTopicForProfile(profileKey);
     }
 
@@ -107,6 +107,25 @@ public class SagaPlannerService {
 
     // NOVO — rollback do passo anterior no plano
     public String getPreviousRollbackTopic(Order order, String failedStep) {
+        RollbackDecision decision = getRollbackDecision(order, failedStep);
+        return decision.type() == RollbackDecisionType.ROUTE ? decision.topic() : null;
+    }
+
+    public RollbackDecision getCurrentRollbackDecision(Order order, String currentStep) {
+        try {
+            SagaPlan plan = getPlan(resolveProfile(order));
+            String normalizedStep = normalizeSource(currentStep);
+            if (!plan.getSteps().contains(normalizedStep)) {
+                return RollbackDecision.fallback();
+            }
+            return RollbackDecision.route(plan.rollbackTopic(normalizedStep));
+        } catch (Exception ex) {
+            log.warn("[SagaPlanner] Error getting current rollback topic: {}", ex.getMessage());
+            return RollbackDecision.fallback();
+        }
+    }
+
+    public RollbackDecision getRollbackDecision(Order order, String failedStep) {
         try {
             String profile = resolveProfile(order);
             SagaPlan plan = getPlan(profile);
@@ -124,12 +143,12 @@ public class SagaPlannerService {
 
             if (currentIndex == -1) {
                 log.warn("[SagaPlanner] Step not found in plan — fallback SAGA_HANDLER");
-                return null;
+                return RollbackDecision.fallback();
             }
 
             if (currentIndex == 0) {
                 log.info("[SagaPlanner] First step reached — finishSagaFail");
-                return null; // null = finishSagaFail
+                return RollbackDecision.complete();
             }
 
             String previousStep   = steps.get(currentIndex - 1);
@@ -138,11 +157,11 @@ public class SagaPlannerService {
             log.info("[SagaPlanner] rollback chain: {} → {} | topic: {}",
                     normalizedStep, previousStep, previousTopic);
 
-            return previousTopic;
+            return RollbackDecision.route(previousTopic);
 
         } catch (Exception e) {
             log.warn("[SagaPlanner] Error getting rollback topic: {}", e.getMessage());
-            return null;
+            return RollbackDecision.fallback();
         }
     }
 
@@ -150,29 +169,34 @@ public class SagaPlannerService {
         String key = "saga-plan:" + profile;
         String json = redis.opsForValue().get(key);
         if (json == null) throw new RuntimeException("No plan for profile: " + profile);
-        return objectMapper.readValue(json, SagaPlan.class);
+        SagaPlan plan = objectMapper.readValue(json, SagaPlan.class);
+        validatePlan(plan);
+        return plan;
+    }
+
+    private void validatePlan(SagaPlan plan) {
+        if (plan.getSteps() == null || plan.getSteps().isEmpty()) {
+            throw new IllegalArgumentException("Saga plan must contain at least one step");
+        }
+        if (plan.getSteps().stream().distinct().count() != plan.getSteps().size()) {
+            throw new IllegalArgumentException("Saga plan contains duplicate steps");
+        }
+        for (String step : plan.getSteps()) {
+            plan.stepToTopic(step);
+            plan.rollbackTopic(step);
+        }
     }
 
     private String resolveProfile(Order order) {
+        if (order == null) return "default";
         String clientType = Optional.ofNullable(order.getClientType()).orElse("default");
         Double totalAmount = Optional.ofNullable(order.getTotalAmount()).orElse(0.0);
 
         return switch (clientType) {
             case "new" -> totalAmount >= 200 ? "new:high-value" : "new:low-value";
             case "vip" -> "vip:any";
-            case "returning" -> "returning:low-value";
+            case "returning" -> totalAmount >= 200 ? "returning:high-value" : "returning:low-value";
             default -> "default";
-        };
-    }
-
-    private String classifyProfile(Order order) {
-        if (order == null || order.getClientType() == null) return "default";
-
-        double amount = order.getTotalAmount();
-        return switch (order.getClientType().toLowerCase()) {
-            case "vip" -> "vip:any";
-            case "returning" -> amount >= 200 ? "returning:high-value" : "returning:low-value";
-            default -> amount >= 200 ? "new:high-value" : "new:low-value";
         };
     }
 
@@ -180,12 +204,28 @@ public class SagaPlannerService {
         return switch (step) {
             case "PRODUCT_VALIDATION" -> "product-validation-success";
             case "PAYMENT" -> "payment-success";
-            case "FRAUD_VALIDATION" -> "fraud-success}";
+            case "FRAUD_VALIDATION" -> "fraud-validation-success";
             case "INVENTORY" -> "inventory-success";
             default -> {
                 log.warn("[SagaPlanner] Unknown step '{}' — using default", step);
                 yield DEFAULT_FIRST_TOPIC;
             }
         };
+    }
+
+    public enum RollbackDecisionType { ROUTE, COMPLETE, FALLBACK }
+
+    public record RollbackDecision(RollbackDecisionType type, String topic) {
+        static RollbackDecision route(String topic) {
+            return new RollbackDecision(RollbackDecisionType.ROUTE, topic);
+        }
+
+        static RollbackDecision complete() {
+            return new RollbackDecision(RollbackDecisionType.COMPLETE, null);
+        }
+
+        static RollbackDecision fallback() {
+            return new RollbackDecision(RollbackDecisionType.FALLBACK, null);
+        }
     }
 }

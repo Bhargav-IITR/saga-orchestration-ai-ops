@@ -8,6 +8,7 @@ import com.learn.orchestrated.order.service.service.EventService;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.apache.commons.lang3.StringUtils;
 
 import java.util.List;
 
@@ -37,7 +38,7 @@ public class EventServiceImpl implements EventService {
 
     @Override
     public EventDocument findByFilters(EventFilter eventFilter) {
-        return !eventFilter.orderId().isEmpty()
+        return StringUtils.isNotBlank(eventFilter.orderId())
                 ? this.findByOrderId(eventFilter.orderId())
                 : this.findByTransactionId(eventFilter.transactionId());
     }

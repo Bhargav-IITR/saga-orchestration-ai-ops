@@ -1,6 +1,9 @@
 server:
   port: 8099
 
+security:
+  api-key: ${APP_API_KEY:}
+
 spring:
   threads:
     virtual:
@@ -11,11 +14,14 @@ spring:
       notify-ending: notify-ending
       remediation-retry: saga-remediation-dlq-retry
       remediation-escalation: saga-remediation-escalation
+      remediation-dlt: saga-remediation-dlt
       inventory-remediation: inventory-remediation
       payment-remediation: payment-remediation
     consumer:
       group-id: ai-agent-group
       remediation-group-id: remediation-engine-group
+      escalation-group-id: remediation-escalation-audit-group
+      dlt-group-id: remediation-dlt-audit-group
       auto-offset-reset: earliest
 
 
@@ -40,8 +46,14 @@ operations:
   cache:
     ttl: ${DIAGNOSTIC_CACHE_TTL:PT24H}
 
+saga:
+  composer:
+    plan-ttl: ${SAGA_PLAN_TTL:PT30M}
+    initial-delay-ms: ${SAGA_PLAN_INITIAL_DELAY_MS:10000}
+    recompute-delay-ms: ${SAGA_PLAN_RECOMPUTE_DELAY_MS:1800000}
+
 ai:
-  primary-model: gemini
+  primary-model: ${AI_PRIMARY_MODEL:gemini}
   ollama:
     base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
     model-name: ${OLLAMA_MODEL:qwen3:8b}

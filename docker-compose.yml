@@ -125,6 +125,7 @@ services:
     environment:
       - KAFKA_BROKER=kafka:29092
       - MONGO_DB_URI=mongodb://admin:123456@order-db:27017
+      - APP_API_KEY=${APP_API_KEY:-}
     ports:
       - 3000:3000
 
@@ -133,10 +134,13 @@ services:
     container_name: orchestrator-service
     depends_on:
       - kafka
+      - redis
     networks:
       - orchestrator-saga
     environment:
       - KAFKA_BROKER=kafka:29092
+      - REDIS_HOST=redis
+      - APP_API_KEY=${APP_API_KEY:-}
     ports:
       - 8050:8050
 
@@ -155,6 +159,7 @@ services:
       - DB_NAME=product-db
       - DB_USER=postgres
       - DB_PASSWORD=postgres
+      - APP_API_KEY=${APP_API_KEY:-}
     ports:
       - 8090:8090
 
@@ -173,6 +178,7 @@ services:
       - DB_NAME=payment-db
       - DB_USER=postgres
       - DB_PASSWORD=postgres
+      - APP_API_KEY=${APP_API_KEY:-}
     ports:
       - 8091:8091
 
@@ -191,8 +197,42 @@ services:
       - DB_NAME=inventory-db
       - DB_USER=postgres
       - DB_PASSWORD=postgres
+      - APP_API_KEY=${APP_API_KEY:-}
     ports:
       - 8092:8092
+
+  ai-saga-agent:
+    build: './ai-saga-agent'
+    container_name: ai-saga-agent
+    depends_on:
+      - vectors-db
+      - redis
+      - kafka
+      - order-service
+      - product-validation-service
+      - payment-service
+      - inventory-service
+    networks:
+      - orchestrator-saga
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      - KAFKA_BROKER=kafka:29092
+      - VECTORS_DB_HOST=vectors-db
+      - VECTORS_DB_PORT=5432
+      - REDIS_HOST=redis
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      - AI_PRIMARY_MODEL=${AI_PRIMARY_MODEL:-gemini}
+      - APP_API_KEY=${APP_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-not-configured}
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY:-not-configured}
+      - ORDER_MCP_URL=http://order-service:3000/sse
+      - PAYMENT_MCP_URL=http://payment-service:8091/sse
+      - INVENTORY_MCP_URL=http://inventory-service:8092/sse
+      - PRODUCT_VALIDATION_MCP_URL=http://product-validation-service:8090/sse
+      - ORCHESTRATOR_MCP_URL=http://orchestrator-service:8050/sse
+    ports:
+      - 8099:8099
 
   prometheus:
     image: prom/prometheus

@@ -66,7 +66,7 @@ cd ai-saga-agent
 GEMINI_API_KEY=your-key ./gradlew bootRun
 ```
 
-The remaining services can be started with `./gradlew bootRun` from their respective directories.
+The remaining services can be started with `./gradlew bootRun` from their respective directories. After all JARs are built, `docker compose up -d` can run all six applications, including `ai-saga-agent`.
 
 ## Configuration
 
